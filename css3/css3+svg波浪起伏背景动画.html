@@ -1,0 +1,83 @@
+<template>
+  <div class="Container">
+    <!--Waves Container-->
+    <svg class="waves" viewBox="0 0 130 80" preserveAspectRatio="none" shape-rendering="auto">
+      <defs>
+        <path id="gentle-wave" d="M-160 44c30 0 58-18 88-18s 58 18 88 18 58-18 88-18 58 18 88 18 v44h-352z" />
+      </defs>
+      <g class="parallax">
+        <use xlink:href="#gentle-wave" x="10" y="0" fill="rgba(24,145,255,0.2)" />
+        <use xlink:href="#gentle-wave" x="10" y="0" fill="rgba(24,145,255,0.1)" />
+        <use xlink:href="#gentle-wave" x="10" y="0" fill="rgba(24,145,255,0.2)" />
+        <use xlink:href="#gentle-wave" x="10" y="0" fill="rgba(24,145,255,0.1)" />
+      </g>
+    </svg>
+    <!--Waves end-->
+  </div>
+</template>
+
+<script>
+  export default {}
+</script>
+<style lang="scss" scoped>
+  .Container {
+    background-image: linear-gradient(to right,
+        rgb(3, 241, 190) 20%,
+        rgb(3, 176, 224) 80%);
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    z-index: 0;
+    top: 0;
+    left: 0
+  }
+
+  /* Animation */
+
+  .parallax>use {
+    animation: move-forever 50s cubic-bezier(0.55, 0.5, 0.45, 0.5) infinite;
+  }
+
+  .parallax>use:nth-child(1) {
+    animation-delay: -2s;
+    animation-duration: 7s;
+  }
+
+  .parallax>use:nth-child(2) {
+    animation-delay: -3s;
+    animation-duration: 9s;
+  }
+
+  .parallax>use:nth-child(3) {
+    animation-delay: -4s;
+    animation-duration: 11s;
+  }
+
+  .parallax>use:nth-child(4) {
+    animation-delay: -5s;
+    animation-duration: 13s;
+  }
+
+  @keyframes move-forever {
+    0% {
+      transform: translate3d(-90px, 0, 0);
+    }
+
+    100% {
+      transform: translate3d(85px, 0, 0);
+    }
+  }
+
+  .waves {
+    width: 200%;
+    height: 500px;
+    min-height: 200px;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+  }
+
+  .content {
+    height: 30vh;
+  }
+</style>
