@@ -804,4 +804,808 @@ function anAsyncCall() {
 
 ---
 
+## 2.7. Promise和数组
+到目前为止我们已经学习了如何通过 .then 和 .catch 来注册回调函数，这些回调函数会在promise对象变为 FulFilled 或 Rejected 状态之后被调用。
 
+如果只有一个promise对象的话我们可以像前面介绍的那样编写代码就可以了，如果要在多个promise对象都变为FulFilled状态的时候才要进行某种处理话该如何操作呢？
+
+我们以当所有XHR（异步处理）全部结束后要进行某操作为例来进行说明。
+
+各位读者现在也许有点难以在大脑中描绘出这么一种场景，我们可以先看一下下面使用了普通的回调函数风格的XHR处理代码。
+
+### 2.7.1. 通过回调方式来进行多个异步调用
+
+multiple-xhr-callback.js
+```
+function getURLCallback(URL, callback) {
+    var req = new XMLHttpRequest();
+    req.open('GET', URL, true);
+    req.onload = function () {
+        if (req.status === 200) {
+            callback(null, req.responseText);
+        } else {
+            callback(new Error(req.statusText), req.response);
+        }
+    };
+    req.onerror = function () {
+        callback(new Error(req.statusText));
+    };
+    req.send();
+}
+// <1> 对JSON数据进行安全的解析
+function jsonParse(callback, error, value) {
+    if (error) {
+        callback(error, value);
+    } else {
+        try {
+            var result = JSON.parse(value);
+            callback(null, result);
+        } catch (e) {
+            callback(e, value);
+        }
+    }
+}
+// <2> 发送XHR请求
+var request = {
+        comment: function getComment(callback) {
+            return getURLCallback('http://azu.github.io/promises-book/json/comment.json', jsonParse.bind(null, callback));
+        },
+        people: function getPeople(callback) {
+            return getURLCallback('http://azu.github.io/promises-book/json/people.json', jsonParse.bind(null, callback));
+        }
+    };
+
+// <3> 启动多个XHR请求，当所有请求返回时调用callback
+function allRequest(requests, callback, results) {
+    if (requests.length === 0) {
+        return callback(null, results);
+    }
+    var req = requests.shift();
+    req(function (error, value) {
+        if (error) {
+            callback(error, value);
+        } else {
+            results.push(value);
+            allRequest(requests, callback, results);
+        }
+    });
+}
+function main(callback) {
+    allRequest([request.comment, request.people], callback, []);
+}
+// 运行的例子
+main(function(error, results){
+    if(error){
+        return console.error(error);
+    }
+    console.log(results);
+});
+```
+
+这段回调函数风格的代码有以下几个要点。
+- 直接使用 JSON.parse 函数的话可能会抛出异常，所以这里使用了一个包装函数 jsonParse
+- 如果将多个XHR处理进行嵌套调用的话层次会比较深，所以使用了 allRequest 函数并在其中对request进行调用。
+- 回调函数采用了 callback(error,value) 这种写法，第一个参数表示错误信息，第二个参数为返回值
+
+在使用 jsonParse 函数的时候我们使用了 bind 进行绑定，通过使用这种偏函数（Partial Function）的方式就可以减少匿名函数的使用。（如果在函数回调风格的代码能很好的做到函数分离的话，也能减少匿名函数的数量）
+```
+jsonParse.bind(null, callback);
+// 可以认为这种写法能转换为以下的写法
+function bindJSONParse(error, value){
+    jsonParse(callback, error, value);
+}
+```
+在这段回调风格的代码中，我们也能发现如下一些问题。
+- 需要显示进行异常处理
+- 为了不让嵌套层次太深，需要一个对request进行处理的函数
+- 到处都是回调函数
+
+下面我们再来看看如何使用 Promise#then 来完成同样的工作。
+
+### 2.7.2. 使用Promise#then同时处理多个异步请求
+需要事先说明的是 Promise.all 比较适合这种应用场景的需求，因此我们故意采用了大量 .then 的晦涩的写法。
+
+使用了.then 的话，也并不是说能和回调风格完全一致，大概重写后代码如下所示。
+
+multiple-xhr.js
+```
+function getURL(URL) {
+    return new Promise(function (resolve, reject) {
+        var req = new XMLHttpRequest();
+        req.open('GET', URL, true);
+        req.onload = function () {
+            if (req.status === 200) {
+                resolve(req.responseText);
+            } else {
+                reject(new Error(req.statusText));
+            }
+        };
+        req.onerror = function () {
+            reject(new Error(req.statusText));
+        };
+        req.send();
+    });
+}
+
+var request = {
+        comment: function getComment() {
+            return getURL('http://azu.github.io/promises-book/json/comment.json').then(JSON.parse);
+        },
+        people: function getPeople() {
+            return getURL('http://azu.github.io/promises-book/json/people.json').then(JSON.parse);
+        }
+    };
+
+function main() {
+    function recordValue(results, value) {
+        results.push(value);
+        return results;
+    }
+    // [] 用来保存初始化的值
+    var pushValue = recordValue.bind(null, []);
+    return request.comment().then(pushValue).then(request.people).then(pushValue);
+}
+
+// 运行的例子
+main().then(function (value) {
+    console.log(value);
+}).catch(function(error){
+    console.error(error);
+});
+```
+将上述代码和回调函数风格相比，我们可以得到如下结论。
+- 可以直接使用 JSON.parse 函数
+- 函数 main() 返回promise对象
+- 错误处理的地方直接对返回的promise对象进行处理
+
+向前面我们说的那样，main的 then 部分有点晦涩难懂。
+
+为了应对这种需要对多个异步调用进行统一处理的场景，Promise准备了 Promise.all 和 Promise.race 这两个静态方法。
+
+在下面的小节中我们将对这两个函数进行说明。
+
+promise-all-xhr.js
+```
+function getURL(URL) {
+    return new Promise(function (resolve, reject) {
+        var req = new XMLHttpRequest();
+        req.open('GET', URL, true);
+        req.onload = function () {
+            if (req.status === 200) {
+                resolve(req.responseText);
+            } else {
+                reject(new Error(req.statusText));
+            }
+        };
+        req.onerror = function () {
+            reject(new Error(req.statusText));
+        };
+        req.send();
+    });
+}
+
+var request = {
+        comment: function getComment() {
+            return getURL('http://azu.github.io/promises-book/json/comment.json').then(JSON.parse);
+        },
+        people: function getPeople() {
+            return getURL('http://azu.github.io/promises-book/json/people.json').then(JSON.parse);
+        }
+    };
+
+function main() {
+    return Promise.all([request.comment(), request.people()]);
+}
+
+// 运行示例
+main().then(function (value) {
+    console.log(value);
+}).catch(function(error){
+    console.log(error);
+});
+```
+这个例子的执行方法和 前面的例子 一样。 不过Promise.all 在以下几点和之前的例子有所不同。
+- main中的处理流程显得非常清晰
+- Promise.all 接收 promise对象组成的数组作为参数
+
+```
+Promise.all([request.comment(), request.people()]);
+```
+在上面的代码中，request.comment() 和 request.people() 会同时开始执行，而且每个promise的结果（resolve或reject时传递的参数值），和传递给 Promise.all 的promise数组的顺序是一致的。
+
+也就是说，这时候 .then 得到的promise数组的执行结果的顺序是固定的，即 [comment, people]。
+
+```
+main().then(function (results) {
+    console.log(results); // 按照[comment, people]的顺序
+});
+```
+如果像下面那样使用一个计时器来计算一下程序执行时间的话，，那么就可以非常清楚的知道传递给 Promise.all 的promise数组是同时开始执行的。
+
+promise-all-timer.js
+```
+// `delay`毫秒后执行resolve
+function timerPromisefy(delay) {
+    return new Promise(function (resolve) {
+        setTimeout(function () {
+            resolve(delay);
+        }, delay);
+    });
+}
+
+var startDate = Date.now();
+// 所有promise变为resolve后程序退出
+Promise.all([
+    timerPromisefy(1),
+    timerPromisefy(32),
+    timerPromisefy(64),
+    timerPromisefy(128)
+]).then(function (values) {
+    console.log(Date.now() - startDate + 'ms');
+    // 約128ms
+    console.log(values);    // [1,32,64,128]
+});
+```
+timerPromisefy 会每隔一定时间（通过参数指定）之后，返回一个promise对象，状态为FulFilled，其状态值为传给 timerPromisefy 的参数。
+
+而传给 Promise.all 的则是由上述promise组成的数组。
+```
+var promises = [
+    timerPromisefy(1),
+    timerPromisefy(32),
+    timerPromisefy(64),
+    timerPromisefy(128)
+];
+```
+这时候，每隔1, 32, 64, 128 ms都会有一个promise发生 resolve 行为。
+
+也就是说，这个promise对象数组中所有promise都变为resolve状态的话，至少需要128ms。实际我们计算一下Promise.all 的执行时间的话，它确实是消耗了128ms的时间。
+
+从上述结果可以看出，传递给 Promise.all 的promise并不是一个个的顺序执行的，而是同时开始、并行执行的。
+
+>如果这些promise全部串行处理的话，那么需要 等待1ms → 等待32ms → 等待64ms → 等待128ms ，全部执行完毕需要225ms的时间。
+
+---
+
+## 2.9. Promise.race
+接着我们来看看和 Promise.all 类似的对多个promise对象进行处理的 Promise.race 方法。
+
+它的使用方法和Promise.all一样，接收一个promise对象数组为参数。
+
+Promise.all 在接收到的所有的对象promise都变为 FulFilled 或者 Rejected 状态之后才会继续进行后面的处理，与之相对的是 Promise.race 只要有一个promise对象进入 FulFilled 或者 Rejected 状态的话，就会继续进行后面的处理。
+
+promise-race-timer.js
+```
+// `delay`毫秒后执行resolve
+function timerPromisefy(delay) {
+    return new Promise(function (resolve) {
+        setTimeout(function () {
+            resolve(delay);
+        }, delay);
+    });
+}
+// 任何一个promise变为resolve或reject 的话程序就停止运行
+Promise.race([
+    timerPromisefy(1),
+    timerPromisefy(32),
+    timerPromisefy(64),
+    timerPromisefy(128)
+]).then(function (value) {
+    console.log(value);    // => 1
+});
+```
+上面的代码创建了4个promise对象，这些promise对象会分别在1ms，32ms，64ms和128ms后变为确定状态，即FulFilled，并且在第一个变为确定状态的1ms后， .then 注册的回调函数就会被调用，这时候确定状态的promise对象会调用 resolve(1) 因此传递给 value 的值也是1，控制台上会打印出1来。
+
+下面我们再来看看在第一个promise对象变为确定（FulFilled）状态后，它之后的promise对象是否还在继续运行。
+
+promise-race-other.js
+```
+var winnerPromise = new Promise(function (resolve) {
+        setTimeout(function () {
+            console.log('this is winner');
+            resolve('this is winner');
+        }, 4);
+    });
+var loserPromise = new Promise(function (resolve) {
+        setTimeout(function () {
+            console.log('this is loser');
+            resolve('this is loser');
+        }, 1000);
+    });
+// 第一个promise变为resolve后程序停止
+Promise.race([winnerPromise, loserPromise]).then(function (value) {
+    console.log(value);    // => 'this is winner'
+});
+```
+我们在前面代码的基础上增加了 console.log 用来输出调试信息。
+
+执行上面代码的话，我们会看到 winnter和loser promise对象的 setTimeout 方法都会执行完毕，console.log 也会分别输出它们的信息。
+
+也就是说， Promise.race 在第一个promise对象变为Fulfilled之后，并不会取消其他promise对象的执行。
+
+>在 ES6 Promises 规范中，也没有取消（中断）promise对象执行的概念，我们必须要确保promise最终进入resolve or reject状态之一。也就是说Promise并不适用于 状态 可能会固定不变的处理。也有一些类库提供了对promise进行取消的操作。
+
+---
+
+## 2.10. then or catch?
+在 上一章 里，我们说过 .catch 也可以理解为 promise.then(undefined, onRejected) 。
+
+在本书里我们还是会将 .catch 和 .then 分开使用来进行错误处理的。
+
+此外我们也会学习一下，在 .then 里同时指定处理对错误进行处理的函数相比，和使用 catch 又有什么异同。
+
+### 2.10.1. 不能进行错误处理的onRejected
+我们看看下面的这段代码。
+
+then-throw-error.js
+```
+function throwError(value) {
+    // 抛出异常
+    throw new Error(value);
+}
+// <1> onRejected不会被调用
+function badMain(onRejected) {
+    return Promise.resolve(42).then(throwError, onRejected);
+}
+// <2> 有异常发生时onRejected会被调用
+function goodMain(onRejected) {
+    return Promise.resolve(42).then(throwError).catch(onRejected);
+}
+// 运行示例
+badMain(function(){
+    console.log("BAD");
+});
+goodMain(function(){
+    console.log("GOOD");
+});
+```
+在上面的代码中， badMain 是一个不太好的实现方式（但也不是说它有多坏）， goodMain 则是一个能非常好的进行错误处理的版本。
+
+为什么说 badMain 不好呢？，因为虽然我们在 .then 的第二个参数中指定了用来错误处理的函数，但实际上它却不能捕获第一个参数 onFulfilled 指定的函数（本例为 throwError ）里面出现的错误。
+
+也就是说，这时候即使 throwError 抛出了异常，onRejected 指定的函数也不会被调用（即不会输出"BAD"字样）。
+
+与此相对的是， goodMain 的代码则遵循了 throwError→onRejected 的调用流程。 这时候 throwError 中出现异常的话，在会被方法链中的下一个方法，即 .catch 所捕获，进行相应的错误处理。
+
+.then 方法中的onRejected参数所指定的回调函数，实际上针对的是其promise对象或者之前的promise对象，而不是针对 .then 方法里面指定的第一个参数，即onFulfilled所指向的对象，这也是 then 和 catch 表现不同的原因。
+
+>.then 和 .catch 都会创建并返回一个 新的 promise对象。Promise实际上每次在方法链中增加一次处理的时候所操作的都不是完全相同的promise对象。
+
+![](http://liubin.org/promises-book/Ch2_HowToWrite/img/then_catch.png)
+
+**Figure 6. Then Catch flow**
+
+这种情况下 then 是针对 Promise.resolve(42) 的处理，在onFulfilled 中发生异常，在同一个 then 方法中指定的 onRejected 也不能捕获该异常。
+
+在这个 then 中发生的异常，只有在该方法链后面出现的 catch 方法才能捕获。
+
+当然，由于 .catch 方法是 .then 的别名，我们使用 .then 也能完成同样的工作。只不过使用 .catch 的话意图更明确，更容易理解。
+```
+Promise.resolve(42).then(throwError).then(null, onRejected);
+```
+
+### 2.10.2. 总结
+这里我们又学习到了如下一些内容。
+1. 使用promise.then(onFulfilled, onRejected) 的话
+   * 在 onFulfilled 中发生异常的话，在 onRejected 中是捕获不到这个异常的。
+2. 在 promise.then(onFulfilled).catch(onRejected) 的情况下
+   * then 中产生的异常能在 .catch 中捕获
+3. .then 和 .catch 在本质上是没有区别的
+   * 要分场合使用。
+
+我们需要注意如果代码类似 badMain 那样的话，就可能出现程序不会按预期运行的情况，从而不能正确的进行错误处理。
+
+---
+
+# 3. Chapter.3 - Promise测试
+这章我们学习如果编写Promise 的测试代码
+
+## 3.1. 基本测试
+关于ES6 Promises的语法我们已经学了一些， 我想大家应该也能够在实际项目中编写Promise 的Demo代码了吧。
+
+这时，接下来你可能要苦恼该如何编写Promise 的测试代码了。
+
+那么让我们先来学习下如何使用 Mocha来对Promise 进行基本的测试吧。
+
+先声明一下，这章中涉及的测试代码都是运行在Node.js环境下的。
+>本书中出现的示例代码也都有相应的测试代码。 测试代码可以参考 azu/promises-book 。
+
+### 3.1.1. Mocha
+Mocha是Node.js下的测试框架工具,在这里，我们并不打算对 Mocha本身进行详细讲解。对 Mocha感兴趣的读者可以自行学习。
+
+Mocha可以自由选择BDD、TDD、exports中的任意风格，测试中用到的Assert 方法也同样可以跟任何其他类库组合使用。  也就是说，Mocha本身只提供执行测试时的框架，而其他部分则由使用者自己选择。
+
+这里我们选择使用Mocha，主要基于下面3点理由。
+* 它是非常著名的测试框架
+* 支持基于Node.js 和浏览器的测试
+* 支持"Promise测试"
+
+最后至于为什么说 支持"Promise测试" ，这个我们在后面再讲。
+
+要想在本章中使用Mocha，我们需要先通过npm来安装Mocha。
+```
+npm install -g mocha
+```
+另外，Assert库我们使用的是Node.js自带的assert模块，所以不需要额外安装。
+
+首先，让我们试着编写一个对传统回调风格的异步函数进行测试的代码。
+
+### 3.1.2. 回调函数风格的测试
+如果想使用回调函数风格来对一个异步处理进行测试，使用Mocha的话代码如下所示。
+
+basic-test.js
+```
+var assert = require('power-assert');
+describe('Basic Test', function () {
+    context('When Callback(high-order function)', function () {
+        it('should use `done` for test', function (done) {
+            setTimeout(function () {
+                assert(true);
+                done();
+            }, 0);
+        });
+    });
+    context('When promise object', function () {
+        it('should use `done` for test?', function (done) {
+            var promise = Promise.resolve(1);
+            // このテストコードはある欠陥があります
+            promise.then(function (value) {
+                assert(value === 1);
+                done();
+            });
+        });
+    });
+});
+```
+将这段代码保存为 basic-test.js，之后就可以使用刚才安装的Mocha的命令行工具进行测试了。
+
+```
+mocha basic-test.js
+```
+Mocha的 it 方法指定了 done 参数，在 done() 函数被执行之前， 该测试一直处于等待状态，这样就可以对异步处理进行测试。
+
+Mocha中的异步测试，将会按照下面的步骤执行。
+```
+it("should use `done` for test", function (done) {
+    // 回调式的异步处理
+    setTimeout(function () {
+        assert(true);
+        done(); // 调用done 后测试结束
+    }, 0)
+})
+```
+这也是一种非常常见的实现方式。
+
+###  3.1.3. 使用done 的Promise测试
+接下来，让我们看看如何使用 done 来进行Promise测试。
+```
+it("should use `done` for test?", function (done) {
+    // 	创建名为Fulfilled 的promise对象
+    var promise = Promise.resolve(42);
+    promise.then(function (value) {
+        assert(value === 42);
+        // 	调用done 后测试结束
+        done();
+    })
+})
+```
+Promise.resolve 用来返回promise对象，返回的promise对象状态为FulFilled。 最后，通过 .then 设置的回调函数也会被调用。
+
+像专栏: Promise只能进行异步操作？中已经提到的那样，promise对象的调用总是异步进行的，所以测试也同样需要以异步调用的方式来编写。
+
+但是，在前面的测试代码中，在assert 失败的情况下就会出现问题。
+
+**对异常promise测试**
+```
+it("should use `done` for test?", function (done) {
+    var promise = Promise.resolve();
+    promise.then(function (value) {
+        assert(false);// => throw AssertionError
+        done();
+    })
+})
+```
+在此次测试中 assert 失败了，所以你可能认为应该抛出“测试失败”的错误， 而实际情况却是测试并不会结束，直到超时。
+![](http://liubin.org/promises-book/Ch3_Testing/img/promise-test-timeout.png)
+
+**Figure 7. 由于测试不会结束，所以直到发生超时时间未知，一直会处于挂起状态。**
+
+通常情况下，assert 失败的时候，会throw一个error， 测试框架会捕获该error，来判断测试失败。
+
+但是，Promise的情况下 .then 绑定的函数执行时发生的error 会被Promise捕获，而测试框架则对此error将会一无所知。
+
+我们来改善一下assert 失败的promise测试，让它能正确处理 assert 失败时的测试结果。
+
+**测试正常失败的示例**
+```
+it("should use `done` for test?", function (done) {
+    var promise = Promise.resolve();
+     promise.then(function (value) {
+         assert(false);
+     }).then(done, done);
+})
+```
+在上面测试正常失败的示例中，为了确保 done 一定会被调用， 我们在最后添加了 .then(done, done); 语句。
+
+assert 测试通过（成功）时会调用 done() ，而 assert 失败时则调用 done(error) 。
+
+这样，我们就编写出了和 回调函数风格的测试 相同的Promise测试。
+
+但是，为了处理 assert 失败的情况，我们需要额外添加 .then(done, done); 的代码。这就要求我们在编写Promise测试时要格外小心，忘了加上上面语句的话，很可能就会写出一个永远不会返回直到超时的测试代码。
+
+在下一节，让我们接着学习一下最初提到的使用Mocha理由中的支持"Promises测试"究竟是一种什么机制。
+
+---
+
+## 3.2. Mocha对Promise的支持
+在这里，我们将会学习什么是Mocha支持的“对Promise测试”。
+
+官方网站 Asynchronous code 也记载了关于Promise测试的概要。
+>Alternately, instead of using the done() callback, you can return a promise. This is useful if the APIs you are testing return promises instead of taking callbacks:
+
+这段话的意思是，在对Promise进行测试的时候，不使用 done() 这样的回调风格的代码编写方式，而是返回一个promise对象。
+
+那么实际上代码将会是什么样的呢？这里我们来看个具体的例子应该容易理解了。
+
+mocha-promise-test.js
+```
+var assert = require('power-assert');
+describe('Promise Test', function () {
+    it('should return a promise object', function () {
+        var promise = Promise.resolve(1);
+        return promise.then(function (value) {
+            assert(value === 1);
+        })
+    })
+})
+```
+这段代码将前面 前面使用 done 的例子 按照Mocha的Promise测试方式进行了重写。
+
+修改的地方主要在以下两点：
+* 删除了 done
+* 返回结果为promise对象
+
+采用这种写法的话，当 assert 失败的时候，测试本身自然也会失败。
+```
+it("should be fail", function () {
+    return Promise.resolve().then(function () {
+        assert(false);// => 测试失败
+    });
+});
+```
+采用这种方法，就能从根本上省略诸如 .then(done, done); 这样本质上跟测试逻辑并无直接关系的代码。
+>Mocha已经支持对Promises的测试 | Web scratch 这篇（日语）文章里也提到了关于Mocha对Promise测试的支持。
+
+### 3.2.1. 意料之外（失败的）的测试结果
+因为Mocha提供了对Promise的测试，所以我们会认为按照Mocha的规则来写会比较好。但是这种代码可能会带来意想不到的异常情况的发生。
+
+比如对下面的mayBeRejected() 函数的测试代码，该函数返回一个当满足某一条件就变为Rejected的promise对象。
+
+**想对Error Object进行测试**
+```
+function mayBeRejected(){ 
+    // 这个函数用来对返回的promise对象进行测试
+    return Promise.reject(new Error("woo"));
+}
+it("is bad pattern", function () {
+    return mayBeRejected().catch(function (error) {
+        assert(error.message === "woo");
+    });
+});
+```
+这个测试的目的包括以下两点：
+* mayBeRejected() 返回的promise对象如果变为FulFilled状态的话
+  * 测试将会失败
+* mayBeRejected() 返回的promise对象如果变为Rejected状态的话
+  * 在 assert 中对Error对象进行检查
+    
+上面的测试代码，当promise对象变为Rejected的时候，会调用在 onRejected 中注册的函数，从而没有走正promise的处理常流程，测试会成功。
+
+这段测试代码的问题在于当mayBeRejected() 返回的是一个 为FulFilled状态的promise对象时，测试会一直成功。
+```
+function mayBeRejected(){ 
+    // 返回的promise对象会变为FulFilled
+    return Promise.resolve();
+}
+it("is bad pattern", function () {
+    return mayBeRejected().catch(function (error) {
+        assert(error.message === "woo");
+    })
+})
+```
+在这种情况下，由于在 catch 中注册的 onRejected 函数并不会被调用，因此 assert 也不会被执行，测试会一直通过（passed，成功）。
+
+为了解决这个问题，我们可以在 .catch 的前面加入一个 .then 调用，可以理解为如果调用了 .then 的话，那么测试就需要失败。
+```
+function failTest() { 
+    // row来使测试失败
+    throw new Error("Expected promise to be rejected but it was fulfilled");
+}
+function mayBeRejected(){
+    return Promise.resolve();
+}
+it("should bad pattern", function () {
+     return mayBeRejected()..then(failTest).catch(function (error) {
+        assert.deepEqual(error.message === "woo");
+    });
+})
+```
+但是，这种写法会像在前面 then or catch? 中已经介绍的一样，failTest 抛出的异常会被 catch 捕获。
+![](http://liubin.org/promises-book/Ch2_HowToWrite/img/then_catch.png)
+
+**Figure 8. Then Catch flow**
+
+程序的执行流程为 then → catch，传递给 catch 的Error对象为AssertionError类型， 这并不是我们想要的东西。 
+
+也就是说，我们希望测试只能通过状态会变为onRejected的promise对象，  如果promise对象状态为onFulfilled状态的话，那么该测试就会一直通过。
+
+### 3.2.2. 明确两种状态，改善测试中的意外（异常）状况
+在编写 上面对Error对象进行测试的例子 时， 怎么才能剔除那些会意外通过测试的情况呢？
+
+最简单的方式就是像下面这样，在测试代码中判断在各种promise对象的状态下，应进行如何的操作。
+
+**变为FulFilled状态的时候**变为FulFilled状态的时候
+* 测试会预期失败
+
+**变为Rejected状态的时候**
+* 使用 assert 进行测试
+
+也就是说，我们需要在测试代码中明确指定在Fulfilled和Rejected这两种状态下，都需进行什么样的处理。
+```
+function mayBeRejected() {
+    return Promise.resolve();
+}
+it("catch -> then", function () {
+    // 变为FulFilled的时候测试失败
+    return mayBeRejected().then(failTest, function (error) {
+        assert(error.message === "woo");
+    });
+});
+```
+像这样的话，就能在promise变为FulFilled的时候编写出失败用的测试代码了。
+![](http://liubin.org/promises-book/Ch3_Testing/img/promise-test.png)
+
+*Figure 9. Promise onRejected test**
+
+在 then or catch? 中我们已经讲过，为了避免遗漏对错误的处理， 与使用 .then(onFulfilled, onRejected) 这样带有二个参数的调用形式相比， 我们更推荐使用 then → catch 这样的处理方式。
+
+但是在编写测试代码的时候，Promise强大的错误处理机制反而成了限制我们的障碍。因此我们不得已采取了 .then(failTest, onRejected) 这种写法，明确指定promise在各种状态下进行何种的处理。
+
+### 3.2.3. 总结
+在本小节中我们对在使用Mocha进行Promise测试时可能出现的一些意外情况进行了介绍。
+* 普通的代码采用 then → catch 的流程的话比较容易理解
+  * 这是为了错误处理的方便。请参考 then or catch?
+* 将测试代码集中到 then 中处理
+  * 为了能将AssertionError对象传递到测试框架中
+
+通过使用 .then(onFulfilled, onRejected) 这种形式的写法， 我们可以明确指定promise对象在变为 Fulfilled或Rejected时如何进行处理。
+
+但是，由于需要显示的指定 Rejected时的测试处理， 像下面这样的代码看起来总是有一些让人感到不太直观的感觉。
+```
+promise.then(failTest, function(error){
+    // 使用assert对error进行测试
+});
+```
+在下一小节，我们会介绍如何编写helper函数以方便编写Promise的测试代码， 以及怎样去编写更容易理解的测试代码。
+
+---
+
+## 3.3. 编写可控测试（controllable tests）
+在继续进行说明之前，我们先来定义一下什么是可控测试。在这里我们对可控测试的定义如下。
+
+待测试的promise对象
+* 如果编写预期为Fulfilled状态的测试的话
+  * Rejected的时候要 Fail
+  * assertion 的结果不一致的时候要 Fail
+* 如果预期为Rejected状态的话
+  * 结果为Fulfilled 测试为 Fail
+  * assertion 的结果不一致的时候要 Fail
+
+如果一个测试能网罗上面的用例（Fail）项，那么我们就称其为可控测试。
+
+也就是说，一个测试用例应该包括下面的测试内容。
+* 结果满足 Fulfilled or Rejected 之一
+* 对传递给assertion的值进行检查
+
+在前面使用了 .then 的代码就是一个期望结果为 Rejected 的测试。
+```
+promise.then(failTest, function(error){
+    // 通过assert验证error对象
+    assert(error instanceof Error);
+});
+```
+
+### 3.3.1. 必须明确指定转换后的状态
+为了编写有效的测试代码， 我们需要明确指定 promise的状态 为 Fulfilled or Rejected 的两者之一。
+
+但是由于 .then 的话在调用的时候可以省略参数，有时候可能会忘记加入使测试失败的条件。
+
+因此，我们可以定义一个helper函数，用来明确定义promise期望的状态。
+
+>笔者（原著者）创建了一个类库 azu/promise-test-helper 以方便对Promise进行测试，本文中使用的是这个类库的简略版。
+
+首先我们创建一个名为 shouldRejected 的helper函数，用来在刚才的 .then 的例子中，期待测试返回状态为 onRejected 的结果的例子。
+
+shouldRejected-test.js
+```
+var assert = require('power-assert');
+function shouldRejected(promise) {
+    return {
+        'catch': function (fn) {
+            return promise.then(function () {
+                throw new Error('Expected promise to be rejected but it was fulfilled');
+            }, function (reason) {
+                fn.call(promise, reason);
+            })
+        }
+    }
+}
+it('should be rejected', function () {
+    var promise = Promise.reject(new Error('human error'));
+    return shouldRejected(promise).catch(function (error) {
+        assert(error.message === 'human error');
+    });
+})
+```
+shouldRejected 函数接收一个promise对象作为参数，并且返回一个带有 catch 方法的对象。
+
+在这个 catch 中可以使用和 onRejected 里一样的代码，因此我们可以在 catch 使用基于 assertion 方法的测试代码。
+
+在 shouldRejected 外部，都是类似如下、和普通的promise处理大同小异的代码。
+1. 将需要测试的promise对象传递给 shouldRejected 方法
+2. 在返回的对象的 catch 方法中编写进行onRejected处理的代码
+3. 在onRejected里使用assertion进行判断
+
+在使用 shouldRejected 函数的时候，如果是 Fulfilled 被调用了的话，则会throw一个异常，测试也会失败。
+```
+promise.then(failTest, function(error){
+    assert(error.message === 'human error');
+});
+// == 几乎这两段代码是同样的意思
+shouldRejected(promise).catch(function (error) {
+    assert(error.message === 'human error');
+});
+```
+使用 shouldRejected 这样的helper函数，测试代码也会变得很直观。
+![](http://liubin.org/promises-book/Ch3_Testing/img/promise-test.png)
+
+**Figure 10. Promise onRejected test**
+
+像上面一样，我们也可以编写一个测试promise对象期待结果为Fulfilled的 shouldFulfilled helper函数。
+
+shouldFulfilled-test.js
+```
+var assert = require('power-assert');
+function shouldFulfilled(promise) {
+    return {
+        'then': function (fn) {
+            return promise.then(function (value) {
+                fn.call(promise, value);
+            }, function (reason) {
+                throw reason;
+            });
+        }
+    };
+}
+it('should be fulfilled', function () {
+    var promise = Promise.resolve('value');
+    return shouldFulfilled(promise).then(function (value) {
+        assert(value === 'value');
+    });
+});
+```
+这和上面的 shouldRejected-test.js 结构基本相同，只不过返回对象的 catch 方法变为了 then，promise.then的两个参数也调换了。
+
+### 3.3.2. 小结
+在本小节我们学习了如何编写针对Promise特定状态的测试代码，以及如何使用便于测试的helper函数。
+
+>这里我们使用到的 shouldFulfilled 和 shouldRejected 也可以在下面的类库中找到。
+azu/promise-test-helper。
+
+此外，本小节中的helper方法都是以 Mocha对Promise的支持 为前提的， 在 基于done 的测试 中使用的话可能会比较麻烦。
+
+是使用基于测试框架对Promis的支持，还是使用基于类似done 这样回调风格的测试方式，每个人都可以自由的选择，只是风格问题，我觉得倒没必要去争一个孰优孰劣。
+
+比如在 CoffeeScript下进行测试的话，由于CoffeeScript 会隐式的使用return返回，所以使用 done 的话可能更容易理解一些。
+
+对Promise进行测试比对通常的异步函数进行测试坑更多，虽说采取什么样的测试方法是个人的自由，但是在同一项目中采取前后风格一致的测试则是非常重要。
