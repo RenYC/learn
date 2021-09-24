@@ -9,12 +9,66 @@ import axios from 'axios'
 // oReq.open('GET', './example.txt');
 // oReq.send()
 
-axios.get('http://localhost:3001/get', {
+axios.get('/get', {
+  params: {
+    a: 1,
+    b: 2
+  }
+})
+
+axios.get('/get', {
   params: {
     foo: ['bar', 'baz']
   }
-}).then(res=>{
-  console.log(res);
 })
 
-console.log(1);
+axios.get('/get', {
+  params: {
+    foo: {
+      bar: 'baz'
+    }
+  }
+})
+
+const date = new Date()
+
+axios({
+  method: 'get',
+  url: '/get',
+  params: {
+    date
+  }
+})
+
+axios({
+  method: 'get',
+  url: '/get',
+  params: {
+    foo: '@:$, '
+  }
+})
+
+axios({
+  method: 'get',
+  url: '/get',
+  params: {
+    foo: 'bar',
+    baz: null
+  }
+})
+
+axios({
+  method: 'get',
+  url: '/get#hash',
+  params: {
+    foo: 'bar'
+  }
+})
+
+axios({
+  method: 'get',
+  url: '/get?foo=bar',
+  params: {
+    bar: 'baz'
+  }
+})
