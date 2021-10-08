@@ -6,8 +6,7 @@
   "pricate": true,
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "webpack serve --open --config webpack.dev.js",
-    "build": "webpack --config webpack.prod.js"
+    "build": "webpack"
   },
   "author": "",
   "license": "ISC",
@@ -21,6 +20,8 @@
     "webpack-merge": "^5.8.0"
   },
   "dependencies": {
-    "lodash": "^4.17.21"
+    "babel-polyfill": "^6.26.0",
+    "lodash": "^4.17.21",
+    "whatwg-fetch": "^3.6.2"
   }
 }

@@ -3,8 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <title>起步</title>
+    <script>
+      const modernBrowser = 'fetch' in window && 'assign' in Object;
+
+      if (!modernBrowser) {
+        const scriptElement = document.createElement('script');
+
+        scriptElement.async = false;
+        scriptElement.src = '/polyfills.bundle.js';
+        document.head.appendChild(scriptElement);
+      }
+    </script>
   </head>
   <body>
-   <script src="main.js"></script>
+    <script src="index.bundle.js"></script>
   </body>
 </html>
